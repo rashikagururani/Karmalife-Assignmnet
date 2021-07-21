@@ -22,6 +22,7 @@ from email import encoders
 
 geocodeReqAdress="http://open.mapquestapi.com/geocoding/v1/address?key=3HfagwzfJZ4NLu8seEskTECVmDBiPG6H&location="
 def getLatLon(adress):
+'''Using Open Geocoding API now we'll fetch latitude & longitude of a given adress.'''
     req=geocodeReqAdress+adress
     ret=requests.get(req)
     retList=json.loads(ret.text)
