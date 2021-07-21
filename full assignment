@@ -1,0 +1,125 @@
+echo "# Karmalife-Assignmnet" >> README.md
+git init
+git add README.md
+git commit -m "first commit"
+git branch -M main
+git remote add origin https://github.com/rashikagururani/Karmalife-Assignmnet.git
+git push -u origin main
+
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+
+
+geocodeReqAdress="http://open.mapquestapi.com/geocoding/v1/address?key=3HfagwzfJZ4NLu8seEskTECVmDBiPG6H&location="
+def getLatLon(adress):
+    req=geocodeReqAdress+adress
+    ret=requests.get(req)
+    retList=json.loads(ret.text)
+    latLng=retList["results"][0]["locations"][0]["latLng"]
+    return [latLng["lat"],latLng["lng"]]
+    
+
+def sendMail(sender,receiver,subject,text,filename,filepath):
+    message = MIMEMultipart()
+    message['From'] = sender
+    message['To'] = receiver
+    message['Subject'] = subject
+    
+    message.attach(MIMEText(text, 'plain'))
+    if filename!=None:
+        attachment = open(os.path.join(filepath,filename),"rb")
+        payload=MIMEBase('application', 'octet-stream')
+        payload.set_payload((attachment).read())
+        encoders.encode_base64(payload)
+        payload.add_header('Content-Disposition', "attachment; filename= %s" % filename)
+        message.attach(payload)
+        session = smtplib.SMTP('smtp.gmail.com', 587) #use gmail with port
+        session.starttls() #enable security
+        try:
+            password=getpass.getpass()
+        except Exception as error:
+            print('Error', error)
+            return
+        else:
+            print('Login with credentials')
+        session.login(sender,password) #login with mail_id and password
+        text = message.as_string()
+        session.sendmail(sender, receiver, text)
+        session.quit()
+        print('Mail Sent Sucessfully')
+        
+"""Parent Directory"""
+parDir="./"
+moviesDir=os.path.join(parDir,"movies")
+if not os.path.exists(moviesDir):
+    os.makedirs(moviesDir)
+
+"""Connection cursor"""
+conn = pymongo.MongoClient('mongodb+srv://assignment:wlF8axz8N4ZvqH6B@assignment.h251h.mongodb.net/')
+
+"""DB cursor"""
+db=conn.sample_mflix
+
+"""List of collections in DB"""
+
+print("Fetching Data from DB")
+moviesDf=pandas.json_normalize(list(db.movies.find()))
+commentsDf=pandas.json_normalize(list(db.comments.find()))
+print("Data Fetching completed")
+
+movies_with_comments=pandas.merge(moviesDf,commentsDf, how='left', left_on=['_id'],right_on=['movie_id'],indicator=True).query('_merge == "both"').drop(columns='_merge')
+
+movies_with_no_comments=pandas.merge(moviesDf,commentsDf, how='left', left_on=['_id'],right_on=['movie_id'],indicator=True).query('_merge != "both"').drop(columns='_merge')
+
+""" Save Dataframe to CSV in movies directory"""
+movies_with_no_comments.to_csv(os.path.join(moviesDir,"movies_with_no_comments.csv"),sep=';')
+
+""" Column base on runtime"""
+movies_with_comments['low_runtime'] = movies_with_comments.apply (lambda row: "yes" if(row['runtime']>50) else "", axis=1)
+movies_with_comments['high_runtime'] = movies_with_comments.apply (lambda row: "no" if(row['runtime']>50) else "", axis=1)
+
+""" Save Dataframe to CSV in movies directory"""
+movies_with_comments.to_csv(os.path.join(moviesDir,"movies_with_comments.csv"),sep=';')
+
+moviesFilt=moviesDf.copy()
+moviesFilt.columns = moviesFilt.columns.str.replace('\.','_',regex=True)
+
+moviesFilt.query(' imdb_rating>8 and released>=@pandas.Timestamp(2000, 1, 1, 0) and awards_wins>3', inplace = True)
+moviesFilt.sort_values("released",axis=0,ascending=True,inplace=False)
+
+""" Save Dataframe to CSV in movies directory"""
+moviesFilt.to_csv(os.path.join(moviesDir,"movies_rating_8_released_aft_2000.csv"),sep=';')
+
+theatersDf=pandas.json_normalize(list(db.theaters.find().))
+
+theater_simplified=theatersDf[['theaterId','location.address.street1','location.address.city','location.address.street2','location.geo.coordinates']].rename(columns={'location.address.street1':'street1','location.address.city':'city','location.address.street2':'street2'})
+theater_simplified['0'] = theater_simplified.apply(lambda row:row['location.geo.coordinates'][0],axis=1)
+theater_simplified['1'] = theater_simplified.apply(lambda row:row['location.geo.coordinates'][1],axis=1)
+theater_simplified.drop(columns='location.geo.coordinates').to_csv(os.path.join(moviesDir,"theater_simplified.csv"),sep=';')
+
+cityApiDict={}
+cityList=theater_simplified['city'].unique().tolist()
+print("Fetching Lat Lon of Cities")
+totalCities=len(cityList)
+for index,city in enumerate(cityList):
+    cityApiDict[city]=getLatLon(city)
+    print(city,cityApiDict[city],"\t",index," of ",totalCities)
+
+theater_simplified['lat'] = theater_simplified.apply(lambda row:cityApiDict[row['city']][0],axis=1)
+theater_simplified['long'] = theater_simplified.apply(lambda row:cityApiDict[row['city']][1],axis=1)
+theater_simplified.drop(columns=['0','1']).to_csv(os.path.join(moviesDir,"theatre_simplified_with_lat_long.csv"),sep=';')
+
+moviesDf['OutsideUsa']=moviesDf.apply(lambda row: False if "USA" in row["countries"] else True,axis=1)
+
+moviesDfFilt=moviesDf.query('OutsideUsa')
+moviesDfFilt.drop(columns='OutsideUsa').to_csv(os.path.join(moviesDir,"released_outside_usa.csv"),sep=';')
+
+
+
+"""Sending Mail"""
+mailSender="yourmail@gmail.com"
+mailReceiver="recv@mail.com"
+
+sendMail(mailSender,mailReceiver,"Mail from Assignment","Hi There,\nPlease find attached CSV file","released_outside_usa.csv",moviesDir)
